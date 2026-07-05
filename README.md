@@ -24,12 +24,30 @@ On many desktops this works as the logged-in user. If BlueZ access fails, check 
 
 ## Install
 
+### Build with local Rust
+
 ```sh
 git clone https://github.com/VRuzhentsov/keepsmile-lamp.git
 cd keepsmile-lamp
 cargo build --release
 install -m 0755 target/release/keepsmile-lamp ~/.local/bin/keepsmile-lamp
 ```
+
+### Build with Docker/Podman
+
+Use this when the host machine does not have the Rust toolchain installed:
+
+```sh
+git clone https://github.com/VRuzhentsov/keepsmile-lamp.git
+cd keepsmile-lamp
+podman build -t keepsmile-lamp-builder .
+podman create --name keepsmile-lamp-extract keepsmile-lamp-builder
+podman cp keepsmile-lamp-extract:/usr/local/bin/keepsmile-lamp ./keepsmile-lamp
+podman rm keepsmile-lamp-extract
+install -m 0755 ./keepsmile-lamp ~/.local/bin/keepsmile-lamp
+```
+
+The same commands work with Docker by replacing `podman` with `docker`.
 
 Make sure `~/.local/bin` is in your `PATH`.
 
@@ -164,6 +182,13 @@ The CLI falls back to cached last-commanded state only when live BLE state canno
 cargo fmt
 cargo test
 cargo build --release
+```
+
+Container build check:
+
+```sh
+podman build -t keepsmile-lamp-builder .
+podman run --rm keepsmile-lamp-builder --help
 ```
 
 The repository intentionally does not include personal config files or local state. Keep `~/.config/keepsmile-lamp/config` and `~/.local/state/keepsmile-lamp/*` outside git.
