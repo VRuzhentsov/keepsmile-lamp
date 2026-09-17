@@ -1,30 +1,25 @@
 # keepsmile-lamp
 
-Rust CLI for controlling KeepSmile KS05-style BLE floor lamps from Linux through BlueZ over system D-Bus.
-
-The project was built from observed lamp behavior plus Android app protocol reverse engineering. It supports normal control commands, decoded live-state reads, and a verbose mode for BLE troubleshooting.
+Async Rust CLI for controlling KeepSmile KS05-style BLE floor lamps through [`VRuzhentsov/ble-gatt`](https://github.com/VRuzhentsov/ble-gatt). The application uses only the library's `Backend` and `GattConnection` interfaces for BLE discovery, connection, GATT writes, and notifications.
 
 ## Features
 
-- Control top and bottom lamp zones.
-- Set RGB color with a single hex value: `--value ff8800` or `--value '#ff8800'`.
-- Set the KS05 white-channel/CW byte with `--value 0..255`.
-- Query and decode live KS05 state via the Android-app state request (`5f0100f5`).
-- Keep routine command output concise, with detailed BLE diagnostics behind `--verbose`.
-- Cache the BlueZ device object path for faster repeated commands.
+- Set CW, RGB, and legacy warm/cool values without changing top or bottom zone power.
+- Preserve the lamp's live brightness when `--brightness` is omitted; there is no implicit 100% default.
+- Ramp from the live CW value to `255` with `warm`, preserving live brightness and zone power. The default duration is 60 seconds.
+- Control top and bottom zones explicitly, or switch both off.
+- Query and decode live state by writing `5f0100f5` to AE01 and receiving AE02 notifications.
+- Probe, listen, disconnect, adjust live-mode brightness, and issue raw GATT writes.
 
 ## Requirements
 
-- Linux with BlueZ running.
-- A Bluetooth adapter managed by BlueZ.
+- Linux with BlueZ and a usable Bluetooth adapter.
 - Rust toolchain for building from source.
-- Permission to access the system D-Bus BlueZ API.
+- Permission to use the host Bluetooth service.
 
-On many desktops this works as the logged-in user. If BlueZ access fails, check your distribution's Bluetooth/D-Bus policy and make sure the user session can control Bluetooth devices.
+`ble-gatt` is pinned in `Cargo.toml`/`Cargo.lock` to commit `e6d795c1e15415de554c229fbb942bf3153f0024` for reproducible builds.
 
-## Install
-
-### Build with local Rust
+## Build
 
 ```sh
 git clone https://github.com/VRuzhentsov/keepsmile-lamp.git
@@ -33,162 +28,78 @@ cargo build --release
 install -m 0755 target/release/keepsmile-lamp ~/.local/bin/keepsmile-lamp
 ```
 
-### Build with Docker/Podman
-
-Use this when the host machine does not have the Rust toolchain installed:
-
-```sh
-git clone https://github.com/VRuzhentsov/keepsmile-lamp.git
-cd keepsmile-lamp
-podman build -t keepsmile-lamp-builder .
-podman create --name keepsmile-lamp-extract keepsmile-lamp-builder
-podman cp keepsmile-lamp-extract:/usr/local/bin/keepsmile-lamp ./keepsmile-lamp
-podman rm keepsmile-lamp-extract
-install -m 0755 ./keepsmile-lamp ~/.local/bin/keepsmile-lamp
-```
-
-The same commands work with Docker by replacing `podman` with `docker`.
-
-Make sure `~/.local/bin` is in your `PATH`.
+The included `Dockerfile` can also build the release binary with Docker or Podman.
 
 ## Configuration
 
-By default the CLI reads:
-
-```text
-~/.config/keepsmile-lamp/config
-```
-
-Example config:
+The default config path is `~/.config/keepsmile-lamp/config`:
 
 ```ini
 ADDRESS=AA:BB:CC:DD:EE:FF
 NAME_PREFIX=KS
 SERVICE_UUID=0000fff0-0000-1000-8000-00805f9b34fb
 CHARACTERISTIC_UUID=0000ae01-0000-1000-8000-00805f9b34fb
-STATE_PATH=~/.local/state/keepsmile-lamp/device-path
-LAMP_STATE_PATH=~/.local/state/keepsmile-lamp/lamp-state
-WARM_WHITE=100
-COOL_WHITE=0
-BRIGHTNESS=100
+NOTIFY_CHARACTERISTIC_UUID=0000ae02-0000-1000-8000-00805f9b34fb
 SCAN_SECONDS=25
-CACHED_CONNECT_CALL_SECONDS=5
-CONNECT_CALL_SECONDS=12
-CONNECT_SECONDS=45
+STATE_TIMEOUT_SECONDS=3
 CONNECT_ATTEMPTS=3
 ```
 
-Use `--config <path>` for a different config file, or `--address <MAC>` to override the configured lamp address for one command.
+Set `ADDRESS` for direct connection. If it is empty, the CLI scans for the configured service and name prefix. `--address` overrides the configured address for one invocation.
+
+Older config keys are ignored, so an existing config can retain them during migration.
 
 ## Usage
 
 ```sh
-# Configured warm scene: top warm white, bottom off
-keepsmile-lamp warm
+# Preserve live brightness and zone power.
+keepsmile-lamp cw --value 128
+keepsmile-lamp rgb --value ff8800
+keepsmile-lamp temp --warm 100 --cool 0
 
-# RGB color. Value accepts RRGGBB or #RRGGBB.
-keepsmile-lamp rgb --value ff0000 --brightness 100
+# Override brightness explicitly (values above 100 are clamped).
+keepsmile-lamp cw --value 255 --brightness 70
 keepsmile-lamp rgb --value '#ff8800' --brightness 70
 
-# White-channel / CW value. Observed mapping: 0 = coldest, 255 = warmest.
-keepsmile-lamp cw --value 0 --brightness 90
-keepsmile-lamp cw --value 255 --brightness 90
+# Ramp from live CW to 255 over 60 seconds, preserving live brightness.
+keepsmile-lamp warm
+keepsmile-lamp warm --seconds 10
 
-# Legacy two-channel temperature command.
-keepsmile-lamp temp --warm 100 --cool 0 --brightness 100
+# Adjust brightness while preserving the live RGB/CW value and zone power.
+keepsmile-lamp --brightness 50
 
-# Zone and power controls.
+# Explicit power controls.
 keepsmile-lamp top on
 keepsmile-lamp bottom off
 keepsmile-lamp off
 
-# Query decoded live state.
+# Read or inspect BLE state without changing lamp settings.
 keepsmile-lamp state
-
-# Release BlueZ connection/cache when the lamp gets stuck.
+keepsmile-lamp probe
+keepsmile-lamp listen --seconds 15
 keepsmile-lamp disconnect
+
+# Advanced raw write; short UUIDs such as ae01 are accepted.
+keepsmile-lamp raw-write --uuid ae01 5f0100f5 --listen-seconds 5
 ```
 
-Routine control commands print one concise success line by default:
+Use `--verbose` before the subcommand to print connection attempts and outgoing packet bytes.
 
-```text
-ok cw=100 brightness=60
-ok rgb=#ff8800 brightness=70
-```
+## Protocol notes
 
-Add `--verbose` before the subcommand to show BLE retry/write details:
-
-```sh
-keepsmile-lamp --verbose cw --value 100 --brightness 60
-```
-
-## KS05 protocol notes
-
-The KS05 floor-lamp protocol exposes a byte the Android app names `cw`. On the tested lamp it behaves as a white-channel temperature/value byte:
-
-- `cw=0` / `0x00` was observed as the coldest white setting.
-- `cw=255` / `0xff` was observed as the warmest white setting.
-- Brightness is a separate byte clamped to `0..100`.
-
-Live state is requested by writing:
-
-```text
-5f0100f5
-```
-
-to the AE01 write characteristic, then listening for AE02 notifications beginning with `5f02`.
-
-Decoded fields currently include:
-
-- top/bottom zone state
-- protocol RGB flag
-- RGB bytes
-- CW byte
-- brightness
-- dynamic flag
-- speed
-- model byte
-
-`state` prints `protocol_rgb_flag` separately so the raw protocol bit is not confused with a user-facing color mode.
-
-## Troubleshooting
-
-### `le-connection-abort-by-local`
-
-This often means BlueZ or another client has a stale connection. Try:
-
-```sh
-keepsmile-lamp disconnect
-keepsmile-lamp state
-```
-
-If it keeps happening, close any phone app connected to the lamp or power-cycle the lamp.
-
-### Command works but output is too quiet
-
-Use verbose mode:
-
-```sh
-keepsmile-lamp --verbose rgb --value ff8800 --brightness 70
-```
-
-### Live state unavailable
-
-The CLI falls back to cached last-commanded state only when live BLE state cannot be read. Treat cached state as a hint, not proof of the current physical lamp state.
+- AE01 write characteristic: `0000ae01-0000-1000-8000-00805f9b34fb`
+- AE02 notification characteristic: `0000ae02-0000-1000-8000-00805f9b34fb`
+- State request: `5f0100f5`
+- In a state response beginning `5f02`, byte 7 is CW and byte 8 is brightness.
+- CW `0` is coldest and `255` is warmest on the observed lamp.
 
 ## Development
 
 ```sh
-cargo fmt
+cargo fmt --check
 cargo test
-cargo build --release
+cargo clippy --all-targets -- -D warnings
+cargo run -- --help
 ```
 
-Container build check:
-
-```sh
-podman build -t keepsmile-lamp-builder .
-podman run --rm keepsmile-lamp-builder --help
-```
-
-The repository intentionally does not include personal config files or local state. Keep `~/.config/keepsmile-lamp/config` and `~/.local/state/keepsmile-lamp/*` outside git.
+Tests exercise protocol packet generation and CLI parsing without accessing a Bluetooth radio. Keep personal config and state outside the repository.
