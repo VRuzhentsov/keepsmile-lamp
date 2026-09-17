@@ -5,5 +5,11 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0"
+ble-gatt = { git = "https://github.com/VRuzhentsov/ble-gatt.git", rev = "e6d795c1e15415de554c229fbb942bf3153f0024" }
 clap = { version = "4.5", features = ["derive"] }
-dbus = "0.9"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+tokio-stream = "0.1"
+uuid = "1"
+
+[dev-dependencies]
+async-trait = "0.1"
