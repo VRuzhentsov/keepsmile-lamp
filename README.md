@@ -65,6 +65,9 @@ keepsmile-lamp rgb --value '#ff8800' --brightness 70
 keepsmile-lamp warm
 keepsmile-lamp warm --duration 10
 
+# Lower brightness only when it is above 50%, over 60 seconds.
+keepsmile-lamp dim --target 50 --duration 60
+
 # Adjust brightness while preserving the live RGB/CW value and zone power.
 keepsmile-lamp --brightness 50
 

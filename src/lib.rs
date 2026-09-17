@@ -96,6 +96,29 @@ pub fn packet_for_live_brightness(live: &LiveFloorState, brightness: u8) -> Vec<
     }
 }
 
+pub fn brightness_ramp_packets(
+    live: &LiveFloorState,
+    target: u8,
+    duration: u64,
+) -> Result<Vec<Vec<u8>>> {
+    if duration == 0 {
+        bail!("brightness ramp duration must be at least one second");
+    }
+    let target = target.min(100);
+    if live.brightness <= target {
+        return Ok(Vec::new());
+    }
+
+    let start = u64::from(live.brightness);
+    let delta = start - u64::from(target);
+    Ok((1..=duration)
+        .map(|step| {
+            let brightness = start - (delta * step / duration);
+            packet_for_live_brightness(live, brightness as u8)
+        })
+        .collect())
+}
+
 pub fn cw_packet(value: u8, brightness: u8) -> Vec<u8> {
     vec![
         0x5a,
@@ -238,6 +261,29 @@ mod tests {
         assert_eq!(
             packet_for_live_brightness(&cw, 50),
             hex("5a0002000000403200a5")
+        );
+    }
+
+    #[test]
+    fn brightness_ramp_only_dims_when_live_brightness_exceeds_target() {
+        let live = LiveFloorState::from_notification(&hex("5f020000010203406400000ff0f5"))
+            .expect("valid state");
+        let packets = brightness_ramp_packets(&live, 50, 2).unwrap();
+
+        assert_eq!(
+            packets,
+            vec![hex("5a0002000000404b00a5"), hex("5a0002000000403200a5"),]
+        );
+        assert!(packets.iter().all(|packet| packet.first() != Some(&0x5b)));
+
+        let already_dim = LiveFloorState {
+            brightness: 40,
+            ..live
+        };
+        assert!(
+            brightness_ramp_packets(&already_dim, 50, 60)
+                .unwrap()
+                .is_empty()
         );
     }
 

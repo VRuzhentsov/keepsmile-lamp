@@ -10,8 +10,8 @@ use ble_gatt::{
 };
 use clap::{Parser, Subcommand, ValueEnum};
 use keepsmile_lamp::{
-    ColorCommand, GET_STATE_PACKET, LiveFloorState, SwitchState, packet_for_live_brightness,
-    packets_for_color, parse_rgb, warm_ramp_packets, zone_packet,
+    ColorCommand, GET_STATE_PACKET, LiveFloorState, SwitchState, brightness_ramp_packets,
+    packet_for_live_brightness, packets_for_color, parse_rgb, warm_ramp_packets, zone_packet,
 };
 use tokio_stream::StreamExt;
 use uuid::Uuid;
@@ -46,6 +46,19 @@ struct Cli {
 enum Command {
     /// Gradually move from the live CW value to warmest white.
     Warm {
+        /// Ramp duration in seconds (1..=86,400).
+        #[arg(
+            long,
+            default_value_t = 60,
+            value_parser = clap::value_parser!(u64).range(1..=MAX_WARM_DURATION_SECONDS)
+        )]
+        duration: u64,
+    },
+    /// Lower live brightness to a target over a duration, preserving color and zone power.
+    Dim {
+        /// Target brightness percentage. If live brightness is already lower, do nothing.
+        #[arg(long, value_parser = clap::value_parser!(u8).range(0..=100))]
+        target: u8,
         /// Ramp duration in seconds (1..=86,400).
         #[arg(
             long,
@@ -229,6 +242,25 @@ async fn execute(cli: &Cli, config: &Config, connection: &mut dyn GattConnection
                 "ok warm cw={}..255 brightness={} duration={duration}",
                 live.cw, live.brightness
             );
+        }
+        Some(Command::Dim { target, duration }) => {
+            let live = query_live_state(connection, config).await?;
+            let packets = brightness_ramp_packets(&live, *target, *duration)?;
+            if packets.is_empty() {
+                println!(
+                    "ok dim unchanged brightness={} target={target}",
+                    live.brightness
+                );
+            } else {
+                for packet in packets {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    write_packet(connection, config, packet).await?;
+                }
+                println!(
+                    "ok dim brightness={}..{target} duration={duration}",
+                    live.brightness
+                );
+            }
         }
         Some(Command::Temp {
             warm,
@@ -712,6 +744,26 @@ mod tests {
 
         assert!(Cli::try_parse_from(["keepsmile-lamp", "warm", "--duration", &maximum]).is_ok());
         assert!(Cli::try_parse_from(["keepsmile-lamp", "warm", "--duration", &too_long]).is_err());
+    }
+
+    #[test]
+    fn dim_accepts_target_and_duration() {
+        let cli = Cli::try_parse_from([
+            "keepsmile-lamp",
+            "dim",
+            "--target",
+            "50",
+            "--duration",
+            "60",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Command::Dim {
+                target: 50,
+                duration: 60
+            })
+        ));
     }
 
     #[test]
