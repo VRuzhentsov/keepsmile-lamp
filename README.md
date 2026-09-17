@@ -6,7 +6,7 @@ Async Rust CLI for controlling KeepSmile KS05-style BLE floor lamps through [`VR
 
 - Set CW, RGB, and legacy warm/cool values without changing top or bottom zone power.
 - Preserve the lamp's live brightness when `--brightness` is omitted; there is no implicit 100% default.
-- Ramp from the live CW value to `255` with `warm`, preserving live brightness and zone power. The default duration is 60 seconds.
+- Ramp from the live CW value to `255` with `warm`, preserving live brightness and zone power. The default duration is 60 seconds; accepted values are 1 through 86,400 seconds (24 hours).
 - Control top and bottom zones explicitly, or switch both off.
 - Query and decode live state by writing `5f0100f5` to AE01 and receiving AE02 notifications.
 - Probe, listen, disconnect, adjust live-mode brightness, and issue raw GATT writes.

@@ -18,6 +18,7 @@ use uuid::Uuid;
 
 const GATT_ATTEMPTS: u32 = 3;
 const GATT_RETRY_DELAY: Duration = Duration::from_millis(250);
+const MAX_WARM_DURATION_SECONDS: u64 = 86_400;
 
 #[derive(Parser)]
 #[command(version, about = "Control KeepSmile BLE floor lamps through ble-gatt")]
@@ -45,8 +46,12 @@ struct Cli {
 enum Command {
     /// Gradually move from the live CW value to warmest white.
     Warm {
-        /// Ramp duration in seconds.
-        #[arg(long, default_value_t = 60)]
+        /// Ramp duration in seconds (1..=86,400).
+        #[arg(
+            long,
+            default_value_t = 60,
+            value_parser = clap::value_parser!(u64).range(1..=MAX_WARM_DURATION_SECONDS)
+        )]
         duration: u64,
     },
     /// Set legacy warm/cool channels without changing zone power.
@@ -698,6 +703,15 @@ mod tests {
     fn warm_accepts_duration_in_seconds() {
         let cli = Cli::try_parse_from(["keepsmile-lamp", "warm", "--duration", "15"]).unwrap();
         assert!(matches!(cli.command, Some(Command::Warm { duration: 15 })));
+    }
+
+    #[test]
+    fn warm_duration_is_limited_to_twenty_four_hours() {
+        let maximum = MAX_WARM_DURATION_SECONDS.to_string();
+        let too_long = (MAX_WARM_DURATION_SECONDS + 1).to_string();
+
+        assert!(Cli::try_parse_from(["keepsmile-lamp", "warm", "--duration", &maximum]).is_ok());
+        assert!(Cli::try_parse_from(["keepsmile-lamp", "warm", "--duration", &too_long]).is_err());
     }
 
     #[test]
