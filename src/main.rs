@@ -47,7 +47,7 @@ enum Command {
     Warm {
         /// Ramp duration in seconds.
         #[arg(long, default_value_t = 60)]
-        seconds: u64,
+        duration: u64,
     },
     /// Set legacy warm/cool channels without changing zone power.
     Temp {
@@ -213,15 +213,15 @@ async fn main() -> Result<()> {
 
 async fn execute(cli: &Cli, config: &Config, connection: &mut dyn GattConnection) -> Result<()> {
     match &cli.command {
-        Some(Command::Warm { seconds }) => {
+        Some(Command::Warm { duration }) => {
             let live = query_live_state(connection, config).await?;
-            let packets = warm_ramp_packets(&live, *seconds)?;
+            let packets = warm_ramp_packets(&live, *duration)?;
             for packet in packets {
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 write_packet(connection, config, packet).await?;
             }
             println!(
-                "ok warm cw={}..255 brightness={} seconds={seconds}",
+                "ok warm cw={}..255 brightness={} duration={duration}",
                 live.cw, live.brightness
             );
         }
@@ -689,9 +689,15 @@ mod tests {
     }
 
     #[test]
-    fn warm_defaults_to_sixty_seconds() {
+    fn warm_defaults_to_sixty_second_duration() {
         let cli = Cli::try_parse_from(["keepsmile-lamp", "warm"]).unwrap();
-        assert!(matches!(cli.command, Some(Command::Warm { seconds: 60 })));
+        assert!(matches!(cli.command, Some(Command::Warm { duration: 60 })));
+    }
+
+    #[test]
+    fn warm_accepts_duration_in_seconds() {
+        let cli = Cli::try_parse_from(["keepsmile-lamp", "warm", "--duration", "15"]).unwrap();
+        assert!(matches!(cli.command, Some(Command::Warm { duration: 15 })));
     }
 
     #[test]

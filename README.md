@@ -63,7 +63,7 @@ keepsmile-lamp rgb --value '#ff8800' --brightness 70
 
 # Ramp from live CW to 255 over 60 seconds, preserving live brightness.
 keepsmile-lamp warm
-keepsmile-lamp warm --seconds 10
+keepsmile-lamp warm --duration 10
 
 # Adjust brightness while preserving the live RGB/CW value and zone power.
 keepsmile-lamp --brightness 50
